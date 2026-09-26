@@ -1,98 +1,105 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, Stack, router } from 'expo-router';
+import { SymbolView, type SFSymbol } from 'expo-symbols';
+import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { ErrorView, useColors } from '@/components/ui';
+import * as cache from '@/db/cache';
+import { disconnect, fetchFolders } from '@/mail/service';
+import type { Folder, SpecialUse } from '@/mail/types';
+import { useAccount } from '@/store/account';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+const ICONS: Record<SpecialUse, SFSymbol> = {
+  inbox: 'tray',
+  sent: 'paperplane',
+  drafts: 'doc',
+  trash: 'trash',
+  junk: 'xmark.bin',
+  archive: 'archivebox',
+  all: 'tray.2',
+  flagged: 'flag',
+};
+
+export default function FoldersScreen() {
+  const c = useColors();
+  const account = useAccount((s) => s.account)!;
+  const signOut = useAccount((s) => s.signOut);
+  const qc = useQueryClient();
+
+  const q = useQuery({
+    queryKey: ['folders', account.email],
+    queryFn: () => fetchFolders(account),
+  });
+  const cached = useQuery({ queryKey: ['folders-cache'], queryFn: cache.loadFolders, staleTime: Infinity });
+  const folders = (q.data ?? cached.data ?? []).filter((f) => f.selectable);
+
+  const onSignOut = () =>
+    Alert.alert('ログアウト', 'このアカウントを削除しますか？', [
+      { text: 'キャンセル', style: 'cancel' },
+      {
+        text: 'ログアウト',
+        style: 'destructive',
+        onPress: async () => {
+          await disconnect().catch(() => undefined);
+          await cache.clearAll();
+          qc.clear();
+          await signOut();
+        },
+      },
+    ]);
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
+    <>
+      <Stack.Screen
+        options={{
+          headerLeft: () => (
+            <Pressable onPress={onSignOut} hitSlop={8}>
+              <Text style={{ color: c.primary, fontSize: 16 }}>ログアウト</Text>
+            </Pressable>
+          ),
+          headerRight: () => (
+            <Pressable onPress={() => router.push('/compose')} hitSlop={8}>
+              <SymbolView name="square.and.pencil" tintColor={c.primary} size={22} />
+            </Pressable>
+          ),
+        }}
+      />
+      {q.error && folders.length === 0 ? (
+        <ErrorView error={q.error} onRetry={() => q.refetch()} />
+      ) : (
+        <FlatList
+          contentInsetAdjustmentBehavior="automatic"
+          data={folders}
+          keyExtractor={(f) => f.path}
+          refreshControl={<RefreshControl refreshing={q.isFetching} onRefresh={() => q.refetch()} />}
+          ListHeaderComponent={<Text style={[styles.account, { color: c.muted }]}>{account.email}</Text>}
+          renderItem={({ item }) => <FolderRow folder={item} />}
+          ItemSeparatorComponent={() => <View style={[styles.sep, { backgroundColor: c.separator }]} />}
+        />
+      )}
+    </>
   );
 }
 
-export default function HomeScreen() {
+function FolderRow({ folder }: { folder: Folder }) {
+  const c = useColors();
+  const depth = folder.delimiter ? folder.path.split(folder.delimiter).length - 1 : 0;
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+    <Link href={{ pathname: '/folder/[path]', params: { path: folder.path, name: folder.name } }} asChild>
+      <Pressable style={({ pressed }) => [styles.row, { paddingLeft: 16 + depth * 16, backgroundColor: pressed ? c.border : c.background }]}>
+        <SymbolView name={folder.specialUse ? ICONS[folder.specialUse] : 'folder'} tintColor={c.primary} size={22} />
+        <Text style={[styles.name, { color: c.text }]} numberOfLines={1}>
+          {folder.name}
+        </Text>
+        <SymbolView name="chevron.right" tintColor={c.muted} size={14} />
+      </Pressable>
+    </Link>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
+  account: { paddingHorizontal: 16, paddingVertical: 8, fontSize: 13 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingRight: 16, gap: 14 },
+  name: { flex: 1, fontSize: 17 },
+  sep: { height: StyleSheet.hairlineWidth, marginLeft: 52 },
 });

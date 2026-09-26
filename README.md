@@ -1,56 +1,63 @@
-# Welcome to your Expo app 👋
+# mailapp
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+WSLで開発するiPhone用のIMAP/SMTPメールアプリ（Expo / React Native）。
 
-## Get started
+## 機能（v1）
+- IMAPでフォルダ一覧・メール一覧（無限スクロール）・本文表示（HTMLは画像ブロック付きで表示）
+- 件名・差出人・宛先でサーバー検索（失敗時はローカルキャッシュで検索）
+- SMTPで新規作成・返信・全員に返信・転送（送信済みフォルダへ保存）
+- 認証情報はKeychain（expo-secure-store）、一覧・本文はSQLiteにキャッシュ
+- Gmail / iCloud / Yahoo!メールはサーバー設定を自動入力
 
-1. Install dependencies
-
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+## 構成
+```
+index.ts               エントリー（TextDecoderのポリフィルを最初に読み込む）
+src/app/               画面（expo-router）
+src/mail/transport.ts  react-native-tcp-socket のラッパー（TLS / STARTTLS）
+src/mail/imap/         IMAPクライアントと応答パーサ
+src/mail/smtp/         SMTPクライアント
+src/mail/mime/         メールの組み立て・解析（postal-mime）
+src/mail/service.ts    接続管理・キャッシュ連携
+src/db/cache.ts        SQLiteキャッシュ
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## 開発コマンド（WSL）
+```bash
+npm test             # 単体テスト（IMAP/SMTPは偽サーバー相手）
+npm run typecheck
+npx expo lint
+```
 
-### Other setup steps
+## iPhone実機で動かす
+IMAP/SMTPはネイティブのTCPソケットを使うため **Expo Goでは動きません**。開発ビルドが必要です。
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+1. Apple Developer Program（年額 $99）に登録する
+2. Expoアカウントを作ってログインする
+   ```bash
+   npx eas-cli@latest login
+   npx eas-cli@latest init
+   ```
+3. iPhoneを登録する（表示されたQRコードをiPhoneで開き、プロファイルをインストールする）
+   ```bash
+   npx eas-cli@latest device:create
+   ```
+4. 開発ビルドを作る（クラウド上のMacでビルドされ、15〜20分ほどかかる）
+   ```bash
+   npx eas-cli@latest build --profile development --platform ios
+   ```
+   完了したら、表示されたQRコードからiPhoneにインストールする。iPhoneの「設定 > プライバシーとセキュリティ > デベロッパモード」をオンにしておく
+5. WSLで開発サーバーを起動し、アプリから接続する
+   ```bash
+   npx expo start --dev-client --tunnel
+   ```
+   WSLはLAN内の別の機器から見えにくいので `--tunnel` を付ける。以後はコードを保存するとiPhone上のアプリに即座に反映される
 
-## Learn more
+ネイティブライブラリを追加・更新したときだけ、手順4をやり直してください。
 
-To learn more about developing your project with Expo, look at the following resources:
+## Gmailで使う場合
+Googleアカウントで2段階認証を有効にし、「アプリパスワード」を発行して、パスワード欄に入力してください。
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## 未対応・今後
+- プッシュ通知（新着を見張るサーバーが必要）
+- 添付ファイルを開く・送る、下書き保存、メールの削除・移動
+- OAuthでのログイン（Outlook.comなど）
